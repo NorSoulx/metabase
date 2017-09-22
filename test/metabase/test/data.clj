@@ -147,17 +147,25 @@
                                    table-id
                                    (u/pprint-to-str (db/select-id->field :name Field, :active true, :table_id table-id))))))))
 
+(def init-db? (atom false))
+
 (defn id
   "Get the ID of the current database or one of its `Tables` or `Fields`.
    Relies on the dynamic variable `*get-db`, which can be rebound with `with-db`."
   ([]
    {:post [(integer? %)]}
+   (when-not @init-db?
+     (throw (Exception. "Database not initialized")))
    (:id (db)))
 
   ([table-name]
+   (when-not @init-db?
+     (throw (Exception. "Database not initialized")))
    (get-table-id-or-explode (id) table-name))
 
   ([table-name field-name & nested-field-names]
+   (when-not @init-db?
+     (throw (Exception. "Database not initialized")))
    (let [table-id (id table-name)]
      (loop [parent-id (get-field-id-or-explode table-id field-name), [nested-field-name & more] nested-field-names]
        (if-not nested-field-name
@@ -242,12 +250,16 @@
                               (create-database! database-definition engine driver)))]
      (try
        (get-or-create!)
+       (reset! init-db? true)
        ;; occasionally we'll see an error like
        ;; java.lang.IllegalArgumentException: No implementation of method: :database->connection-details of protocol: IDriverTestExtensions found for class: metabase.driver.h2.H2Driver
        ;; to fix this we just need to reload a couple namespaces and then try again
-       (catch IllegalArgumentException _
+       (catch IllegalArgumentException e
+         (println "Failed to create db, trying again")
+         (.printStackTrace e)
          (reload-test-extensions engine)
-         (get-or-create!))))))
+         (get-or-create!)
+         (reset! init-db? true))))))
 
 
 (defn do-with-temp-db
